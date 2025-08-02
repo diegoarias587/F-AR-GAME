@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>F1 AR 2025 Demo</title>
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+  <style>
+    body, html { margin: 0; padding: 0; overflow: hidden; }
+    #menu {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      padding: 10px;
+      z-index: 10;
+      font-family: sans-serif;
+    }
+    #menu select, #menu button {
+      margin: 4px;
+    }
+    #status { font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <div id="menu">
+    <label>Equipo/Piloto:
+      <select id="car-select"></select>
+    </label>
+    <button id="record-btn">Comenzar grabación</button>
+    <button id="stop-btn" disabled>Detener</button>
+    <button id="start-race" disabled>Iniciar carrera</button>
+    <span id="status"></span>
+  </div>
+  <a-scene embedded arjs="sourceType: webcam;" renderer="logarithmicDepthBuffer: true">
+    <a-entity id="player-car" gps-entity-place="latitude:0; longitude:0" rotation="0 0 0" scale="0.5 0.5 0.5">
+      <a-box depth="1" height="0.3" width="0.5" color="red"></a-box>
+    </a-entity>
+  </a-scene>
+<script>
+const teams = [
+  {team: 'Red Bull', driver: 'Verstappen'},
+  {team: 'Red Bull', driver: 'Perez'},
+  {team: 'Ferrari', driver: 'Leclerc'},
+  {team: 'Ferrari', driver: 'Sainz'},
+  {team: 'Mercedes', driver: 'Hamilton'},
+  {team: 'Mercedes', driver: 'Russell'},
+  {team: 'McLaren', driver: 'Norris'},
+  {team: 'McLaren', driver: 'Piastri'},
+  {team: 'Aston Martin', driver: 'Alonso'},
+  {team: 'Aston Martin', driver: 'Stroll'},
+  {team: 'Alpine', driver: 'Ocon'},
+  {team: 'Alpine', driver: 'Gasly'},
+  {team: 'Williams', driver: 'Albon'},
+  {team: 'Williams', driver: 'Sargeant'},
+  {team: 'RB', driver: 'Tsunoda'},
+  {team: 'RB', driver: 'Ricciardo'},
+  {team: 'Haas', driver: 'Magnussen'},
+  {team: 'Haas', driver: 'Hulkenberg'},
+  {team: 'Sauber', driver: 'Bottas'},
+  {team: 'Sauber', driver: 'Zhou'}
+];
+const select = document.getElementById('car-select');
+teams.forEach((t,i)=>{
+  const opt=document.createElement('option');
+  opt.value=i;
+  opt.textContent=`${t.team} - ${t.driver}`;
+  select.appendChild(opt);
+});
+let recording=false;
+let track=[];
+let watchId=null;
+const statusEl=document.getElementById('status');
+const recordBtn=document.getElementById('record-btn');
+const stopBtn=document.getElementById('stop-btn');
+const startRaceBtn=document.getElementById('start-race');
+recordBtn.onclick=function(){
+  track=[];
+  recording=true;
+  startRaceBtn.disabled=true;
+  stopBtn.disabled=false;
+  recordBtn.disabled=true;
+  statusEl.textContent='Grabando circuito...';
+  if(navigator.geolocation){
+    watchId=navigator.geolocation.watchPosition(pos=>{
+      const {latitude,longitude}=pos.coords;
+      track.push({lat:latitude,lon:longitude});
+    },err=>console.error(err),{enableHighAccuracy:true});
+  }else{statusEl.textContent='Geolocalización no soportada';}
+};
+stopBtn.onclick=function(){
+  recording=false;
+  navigator.geolocation.clearWatch(watchId);
+  stopBtn.disabled=true;
+  recordBtn.disabled=false;
+  startRaceBtn.disabled=track.length<2;
+  statusEl.textContent=`Circuito grabado: ${track.length} puntos`;
+  localStorage.setItem('f1-track',JSON.stringify(track));
+};
+startRaceBtn.onclick=function(){
+  const saved=JSON.parse(localStorage.getItem('f1-track')||'[]');
+  if(!saved.length){alert('No hay circuito');return;}
+  let idx=0;
+  statusEl.textContent='Carrera iniciada';
+  const player=document.getElementById('player-car');
+  function move(){
+    if(idx>=saved.length){statusEl.textContent='Carrera finalizada';return;}
+    const p=saved[idx];
+    player.setAttribute('gps-entity-place',`latitude:${p.lat};longitude:${p.lon}`);
+    idx++;setTimeout(move,1000);
+  }
+  move();
+};
+</script>
+</body>
+</html>
