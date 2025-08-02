@@ -174,6 +174,8 @@
         lapCounterCanvas.height = 256;
         const lapCounterCtx = lapCounterCanvas.getContext('2d');
         const lapCounterTexture = new THREE.CanvasTexture(lapCounterCanvas);
+        let lapStartTime = 0;
+        let lastLapTime = 0;
 
         const ui = {
             overlay: document.getElementById('ui-overlay'),
@@ -256,16 +258,23 @@
                         log(`<span style="color: red;">ERROR loading ${modelInfo.name}. Creating placeholder.</span>`);
                         object = new THREE.Mesh(new THREE.BoxGeometry(5.7, 1.2, 2), new THREE.MeshStandardMaterial({ color: 0xcccccc }));
                     }
+                    // Scale roughly to real F1 size and place origin at ground center
                     const bbox = new THREE.Box3().setFromObject(object);
+                    const center = bbox.getCenter(new THREE.Vector3());
                     const size = bbox.getSize(new THREE.Vector3());
-                    const maxDim = Math.max(size.x, size.y, size.z);
+                    object.position.sub(center);
+                    const maxDim = Math.max(size.x, size.z);
                     const desiredLength = 5; // meters, slightly smaller than real F1 car
                     const scale = desiredLength / maxDim;
                     object.scale.setScalar(scale);
-                    object.visible = false;
-                    scene.add(object);
+                    bbox.setFromObject(object);
+                    object.position.y -= bbox.min.y;
+                    const wrapper = new THREE.Group();
+                    wrapper.add(object);
+                    wrapper.visible = false;
+                    scene.add(wrapper);
                     const carData = {
-                        name: modelInfo.name, model: object, laps: 0, progress: 0, speed: 0,
+                        name: modelInfo.name, model: wrapper, laps: 0, progress: 0, speed: 0,
                         isPlayer: modelInfo.name === 'Player', gridPosition: new THREE.Vector3(), gridQuaternion: new THREE.Quaternion(),
                         state: 'IDLE', pitTimeout: 0
                     };
@@ -403,7 +412,7 @@
                          </div>`
                     );
                     ui.raceHud.classList.remove('hidden');
-                    startRaceCountdown();
+                    startRaceCountdown(23);
                     break;
                 case 'RACE':
                     setUI('');
@@ -547,10 +556,10 @@
             playerCar.state = 'FORMATION_LAP';
         }
 
-        function startRaceCountdown() {
+        function startRaceCountdown(duration = 3) {
             if (playerStartMarker) playerStartMarker.visible = false;
             const countdownEl = document.getElementById('countdown');
-            let count = 3;
+            let count = duration;
             const interval = setInterval(() => {
                 if (countdownEl) countdownEl.textContent = count > 0 ? count : "¡YA!";
                 count--;
@@ -560,10 +569,14 @@
                         c.progress = getClosestTrackProgress(c.model.position);
                         c.state = 'RACING';
                         c.speed = 0.00008 + Math.random() * 0.00003;
+                        c.laps = 0;
                     });
                     playerCar.progress = getClosestTrackProgress(playerCar.model.position);
                     playerCar.state = 'RACING';
                     playerCar.laps = 0;
+                    lastLapTime = 0;
+                    lapStartTime = performance.now();
+                    lastPlayerPos.copy(playerCar.model.position);
                     updateLapCounter();
                     changeState('RACE');
                 }
@@ -588,17 +601,17 @@
 
         function updateAI(delta) {
             if (!raceTrackCurve) return;
-            let allAIsInPit = true;
+            let allAIsRegridded = true;
             for (const car of cars) {
                 if (car.state === 'FORMATION_LAP' || car.state === 'RACING') {
-                    if (car.laps > 0 && car.progress > 0.9 && Math.random() < 0.001) {
+                    if (car.state === 'RACING' && car.laps > 0 && car.progress > 0.9 && Math.random() < 0.001) {
                         car.state = 'PITTING';
                         log(`${car.name} is pitting!`);
                     }
                     car.progress += car.speed * delta * 60;
                     if (car.progress >= 1) {
                         car.progress -= 1;
-                        if (car.state === 'FORMATION_LAP') { car.state = 'PITTING'; car.speed = 0; }
+                        if (car.state === 'FORMATION_LAP') { car.state = 'REGRIDDING'; car.speed = 0; }
                         else { car.laps++; if (car.laps >= totalLaps) changeState('RACE_OVER'); }
                     }
                     const newPosition = raceTrackCurve.getPointAt(car.progress);
@@ -610,10 +623,12 @@
                         log(`Collision between ${car.name} and Player`);
                         changeState('RED_FLAG');
                     }
+                    if (car.state !== 'ON_GRID') allAIsRegridded = false;
                 } else if (car.state === 'REGRIDDING') {
                     car.model.position.lerp(car.gridPosition, 0.05);
                     car.model.quaternion.slerp(car.gridQuaternion, 0.05);
                     if (car.model.position.distanceTo(car.gridPosition) < 0.1) car.state = 'ON_GRID';
+                    else allAIsRegridded = false;
                 } else if (car.state === 'PITTING') {
                     const pitBox = pitBoxes[cars.indexOf(car) + 1];
                     if (pitBox) {
@@ -623,16 +638,17 @@
                             car.pitTimeout = 5;
                         }
                     } else { car.state = 'RACING'; }
+                    allAIsRegridded = false;
                 } else if (car.state === 'IN_PIT') {
                     car.pitTimeout -= delta;
                     if (car.pitTimeout <= 0) { car.state = 'RACING'; }
+                    allAIsRegridded = false;
+                } else if (car.state !== 'ON_GRID') {
+                    allAIsRegridded = false;
                 }
-                if (car.state !== 'IN_PIT') allAIsInPit = false;
             }
-            if (gameState === 'FORMATION_LAP' && allAIsInPit && playerCar.state === 'IN_PIT') {
-                playerCar.laps = 0;
-                updateLapCounter();
-                changeState('RACE_COUNTDOWN');
+            if (gameState === 'FORMATION_LAP' && allAIsRegridded && playerCar.state === 'FORMATION_DONE') {
+                changeState('AWAITING_PLAYER_POSITION');
             }
         }
         
@@ -665,15 +681,18 @@
             if (playerCar.state === 'FORMATION_LAP' && finishLinePlane) {
                 const side = finishLinePlane.distanceToPoint(playerCar.model.position);
                 const lastSide = finishLinePlane.distanceToPoint(lastPlayerPos);
-                if (Math.sign(side) !== Math.sign(lastSide)) {
-                    playerCar.state = 'PITTING';
+                if (Math.sign(side) !== Math.sign(lastSide) && playerCar.progress > 0.8) {
+                    playerCar.state = 'FORMATION_DONE';
                 }
             }
 
             if (playerCar.state === 'RACING' && finishLinePlane) {
                 const side = finishLinePlane.distanceToPoint(playerCar.model.position);
                 const lastSide = finishLinePlane.distanceToPoint(lastPlayerPos);
-                if (Math.sign(side) !== Math.sign(lastSide)) {
+                if (Math.sign(side) !== Math.sign(lastSide) && playerCar.progress > 0.8) {
+                    const now = performance.now();
+                    lastLapTime = (now - lapStartTime) / 1000;
+                    lapStartTime = now;
                     playerCar.laps++;
                     updateLapCounter();
                     if (playerCar.laps >= totalLaps) changeState('RACE_OVER');
@@ -717,8 +736,21 @@
             });
         }
 
+        function formatTime(t) {
+            const mins = Math.floor(t / 60);
+            const secs = (t % 60).toFixed(2).padStart(5, '0');
+            return `${mins}:${secs}`;
+        }
+
         function updateLapCounter(text = null) {
-            const display = text ? `Vuelta: ${text} / ${totalLaps}` : `Vuelta: ${playerCar.laps} / ${totalLaps}`;
+            let display;
+            if (text) {
+                display = `Vuelta: ${text} / ${totalLaps}`;
+            } else {
+                const current = lapStartTime ? (performance.now() - lapStartTime) / 1000 : 0;
+                display = `Vuelta: ${playerCar.laps} / ${totalLaps} | Tiempo: ${formatTime(current)}`;
+                if (lastLapTime) display += ` (Ult: ${formatTime(lastLapTime)})`;
+            }
             ui.lapCounter.textContent = display;
             lapCounterCtx.clearRect(0, 0, lapCounterCanvas.width, lapCounterCanvas.height);
             lapCounterCtx.fillStyle = 'rgba(0,0,0,0.6)';
@@ -763,6 +795,10 @@
 
             if (['PRE_RACE_TIMER', 'FORMATION_LAP', 'RACE_COUNTDOWN', 'AWAITING_PLAYER_POSITION', 'RACE', 'RACE_OVER', 'RED_FLAG'].includes(gameState)) {
                 updateLeaderboard();
+            }
+
+            if (gameState === 'RACE') {
+                updateLapCounter();
             }
 
             if (gameState === 'AWAITING_PLAYER_POSITION' && playerStartMarker && playerCar.model.position.distanceTo(playerStartMarker.position) < 2.0) {
