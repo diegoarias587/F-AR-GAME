@@ -29,12 +29,42 @@
     <label>Equipo/Piloto:
       <select id="car-select"></select>
     </label>
+    <label>Vueltas:
+      <input id="laps" type="number" value="3" min="1" style="width:60px;">
+    </label>
     <button id="record-btn">Comenzar grabación</button>
     <button id="stop-btn" disabled>Detener</button>
+    <button id="add-pit" disabled>Marcar pit</button>
     <button id="start-race" disabled>Iniciar carrera</button>
     <span id="status"></span>
   </div>
+  <div id="hud" style="position:fixed;bottom:10px;left:10px;color:white;z-index:10;font-family:sans-serif;">
+    Vuelta <span id="lap">0</span>
+  </div>
   <a-scene embedded arjs="sourceType: webcam;" renderer="logarithmicDepthBuffer: true">
+    <a-assets>
+      <!-- modelos de autos. Sube estos archivos a la misma estructura en tu servidor -->
+      <a-asset-item id="verstappen" src="models/f1/red%20bull/vertappen/verstappen.obj"></a-asset-item>
+      <a-asset-item id="perez" src="models/f1/red%20bull/player/player.obj"></a-asset-item>
+      <a-asset-item id="leclerc" src="models/f1/ferrari/leclerc/leclerc.obj"></a-asset-item>
+      <a-asset-item id="sainz" src="models/f1/ferrari/sainz/SAINZ.obj"></a-asset-item>
+      <a-asset-item id="hamilton" src="models/f1/mercedes/hamilton/hamilton.obj"></a-asset-item>
+      <a-asset-item id="russell" src="models/f1/mercedes/russell/russell.obj"></a-asset-item>
+      <a-asset-item id="norris" src="models/f1/mclaren/Norris/norris.obj"></a-asset-item>
+      <a-asset-item id="piastri" src="models/f1/mclaren/Piastri/piastri.obj"></a-asset-item>
+      <a-asset-item id="alonso" src="models/f1/aston%20martin/alonso/alonso.obj"></a-asset-item>
+      <a-asset-item id="stroll" src="models/f1/aston%20martin/stroll/stroll.obj"></a-asset-item>
+      <a-asset-item id="ocon" src="models/f1/alpine/ocon/ocon.obj"></a-asset-item>
+      <a-asset-item id="gasly" src="models/f1/alpine/gasly/GASLY.obj"></a-asset-item>
+      <a-asset-item id="albon" src="models/f1/williams/albon/albon.obj"></a-asset-item>
+      <a-asset-item id="sargeant" src="models/f1/williams/sargent/sargent.obj"></a-asset-item>
+      <a-asset-item id="tsunoda" src="models/f1/alphaturi/tsunoda/tsunoda.obj"></a-asset-item>
+      <a-asset-item id="ricciardo" src="models/f1/alphaturi/riccardo/riccardo.obj"></a-asset-item>
+      <a-asset-item id="magnussen" src="models/f1/haas/magnussen/magnussen.obj"></a-asset-item>
+      <a-asset-item id="hulkenberg" src="models/f1/haas/hulkemberg/hulkemberg.obj"></a-asset-item>
+      <a-asset-item id="bottas" src="models/f1/alfa%20romeo/vottas/vottas.obj"></a-asset-item>
+      <a-asset-item id="zhou" src="models/f1/alfa%20romeo/zhou/zhou.obj"></a-asset-item>
+    </a-assets>
     <a-entity id="player-car" gps-entity-place="latitude:0; longitude:0" rotation="0 0 0" scale="0.5 0.5 0.5">
       <a-box depth="1" height="0.3" width="0.5" color="red"></a-box>
     </a-entity>
@@ -71,16 +101,22 @@ teams.forEach((t,i)=>{
 });
 let recording=false;
 let track=[];
+let pits=[];
 let watchId=null;
 const statusEl=document.getElementById('status');
 const recordBtn=document.getElementById('record-btn');
 const stopBtn=document.getElementById('stop-btn');
 const startRaceBtn=document.getElementById('start-race');
+const addPitBtn=document.getElementById('add-pit');
+const lapCountInput=document.getElementById('laps');
+const lapEl=document.getElementById('lap');
 recordBtn.onclick=function(){
   track=[];
+  pits=[];
   recording=true;
   startRaceBtn.disabled=true;
   stopBtn.disabled=false;
+  addPitBtn.disabled=false;
   recordBtn.disabled=true;
   statusEl.textContent='Grabando circuito...';
   if(navigator.geolocation){
@@ -95,21 +131,60 @@ stopBtn.onclick=function(){
   navigator.geolocation.clearWatch(watchId);
   stopBtn.disabled=true;
   recordBtn.disabled=false;
+  addPitBtn.disabled=true;
   startRaceBtn.disabled=track.length<2;
   statusEl.textContent=`Circuito grabado: ${track.length} puntos`;
   localStorage.setItem('f1-track',JSON.stringify(track));
+  localStorage.setItem('f1-pits',JSON.stringify(pits));
+};
+addPitBtn.onclick=function(){
+  if(!track.length)return;
+  const last=track[track.length-1];
+  pits.push(last);
+  statusEl.textContent=`Pits marcados: ${pits.length}`;
 };
 startRaceBtn.onclick=function(){
   const saved=JSON.parse(localStorage.getItem('f1-track')||'[]');
+  const pitPos=JSON.parse(localStorage.getItem('f1-pits')||'[]');
   if(!saved.length){alert('No hay circuito');return;}
+  const laps=parseInt(lapCountInput.value,10)||1;
+  let lap=0;
   let idx=0;
+  lapEl.textContent='0';
   statusEl.textContent='Carrera iniciada';
   const player=document.getElementById('player-car');
+  const ai=[];
+  const scene=document.querySelector('a-scene');
+  teams.forEach((t,i)=>{
+    if(i===parseInt(select.value,10))return; // skip player
+    const mId=t.driver.toLowerCase();
+    const car=document.createElement('a-entity');
+    car.setAttribute('gps-entity-place','latitude:0;longitude:0');
+    car.setAttribute('scale','0.5 0.5 0.5');
+    car.setAttribute('obj-model',`obj:#${mId}`);
+    scene.appendChild(car);
+    ai.push({el:car,idx:-5*i});
+  });
   function move(){
-    if(idx>=saved.length){statusEl.textContent='Carrera finalizada';return;}
+    if(lap>=laps){
+      statusEl.textContent='Carrera finalizada';
+      return;
+    }
     const p=saved[idx];
     player.setAttribute('gps-entity-place',`latitude:${p.lat};longitude:${p.lon}`);
-    idx++;setTimeout(move,1000);
+    ai.forEach(c=>{
+      const aiIdx=(c.idx+saved.length)%saved.length;
+      const pt=saved[aiIdx];
+      c.el.setAttribute('gps-entity-place',`latitude:${pt.lat};longitude:${pt.lon}`);
+      c.idx++;
+    });
+    idx++;
+    if(idx>=saved.length){
+      idx=0;
+      lap++;
+      lapEl.textContent=lap;
+    }
+    setTimeout(move,1000);
   }
   move();
 };
