@@ -168,6 +168,12 @@
         let lastPlayerPos = new THREE.Vector3();
         let playerStartMarker = null;
         let placementCounter = 0;
+        let lapCounterBoard = null;
+        const lapCounterCanvas = document.createElement('canvas');
+        lapCounterCanvas.width = 512;
+        lapCounterCanvas.height = 256;
+        const lapCounterCtx = lapCounterCanvas.getContext('2d');
+        const lapCounterTexture = new THREE.CanvasTexture(lapCounterCanvas);
 
         const ui = {
             overlay: document.getElementById('ui-overlay'),
@@ -250,7 +256,12 @@
                         log(`<span style="color: red;">ERROR loading ${modelInfo.name}. Creating placeholder.</span>`);
                         object = new THREE.Mesh(new THREE.BoxGeometry(5.7, 1.2, 2), new THREE.MeshStandardMaterial({ color: 0xcccccc }));
                     }
-                    object.scale.set(0.6, 0.6, 0.6);
+                    const bbox = new THREE.Box3().setFromObject(object);
+                    const size = bbox.getSize(new THREE.Vector3());
+                    const maxDim = Math.max(size.x, size.y, size.z);
+                    const desiredLength = 5; // meters, slightly smaller than real F1 car
+                    const scale = desiredLength / maxDim;
+                    object.scale.setScalar(scale);
                     object.visible = false;
                     scene.add(object);
                     const carData = {
@@ -349,6 +360,16 @@
                     );
                     if (reticle) { reticle.visible = true; reticle.material.color.set(0xffffff); }
                     break;
+                case 'SETUP_LAP_COUNTER':
+                    setUI(
+                        `<div class="ui-panel">
+                            <p id="message-box">Coloca el contador de vueltas</p>
+                            <button id="action-button">Colocar</button>
+                         </div>`,
+                        { 'action-button': onActionButtonClick }
+                    );
+                    if (reticle) { reticle.visible = true; reticle.material.color.set(0xff0000); }
+                    break;
                 case 'PRE_RACE_TIMER':
                     setUI(
                         `<div class="ui-panel">
@@ -421,6 +442,8 @@
                 placeNextPit();
             } else if (gameState === 'SETUP_GRID') {
                 placeNextGridPosition();
+            } else if (gameState === 'SETUP_LAP_COUNTER') {
+                placeLapCounter();
             }
         }
         
@@ -483,14 +506,28 @@
             placementCounter++;
             if (placementCounter >= allCars.length) {
                 log('All grid positions placed.');
-                changeState('PRE_RACE_TIMER');
+                changeState('SETUP_LAP_COUNTER');
             } else {
                 document.getElementById('message-box').textContent = `Coloca la Posición #${placementCounter + 1} (${allCars[placementCounter].name})`;
                 reticle.material.color.set(0xffa500);
             }
         }
 
+        function placeLapCounter() {
+            lapCounterBoard = new THREE.Mesh(
+                new THREE.PlaneGeometry(1.5, 0.75),
+                new THREE.MeshBasicMaterial({ map: lapCounterTexture, transparent: true, side: THREE.DoubleSide })
+            );
+            lapCounterBoard.position.setFromMatrixPosition(reticle.matrix);
+            lapCounterBoard.position.y += 1.5;
+            lapCounterBoard.lookAt(camera.position);
+            scene.add(lapCounterBoard);
+            updateLapCounter('0');
+            changeState('PRE_RACE_TIMER');
+        }
+
         function startPreRaceTimer() {
+            updateLapCounter('0');
             let timer = 60;
             const countdownEl = document.getElementById('countdown');
             const interval = setInterval(() => {
@@ -681,7 +718,17 @@
         }
 
         function updateLapCounter(text = null) {
-            ui.lapCounter.textContent = text ? `Vuelta: ${text} / ${totalLaps}` : `Vuelta: ${playerCar.laps} / ${totalLaps}`;
+            const display = text ? `Vuelta: ${text} / ${totalLaps}` : `Vuelta: ${playerCar.laps} / ${totalLaps}`;
+            ui.lapCounter.textContent = display;
+            lapCounterCtx.clearRect(0, 0, lapCounterCanvas.width, lapCounterCanvas.height);
+            lapCounterCtx.fillStyle = 'rgba(0,0,0,0.6)';
+            lapCounterCtx.fillRect(0, 0, lapCounterCanvas.width, lapCounterCanvas.height);
+            lapCounterCtx.fillStyle = '#fff';
+            lapCounterCtx.font = '64px sans-serif';
+            lapCounterCtx.textAlign = 'center';
+            lapCounterCtx.textBaseline = 'middle';
+            lapCounterCtx.fillText(display, lapCounterCanvas.width / 2, lapCounterCanvas.height / 2);
+            lapCounterTexture.needsUpdate = true;
         }
 
         let lastTime = 0;
@@ -735,6 +782,7 @@
                  }
             }
 
+            if (lapCounterBoard) lapCounterBoard.lookAt(camera.position);
             renderer.render(scene, camera);
         }
     </script>
