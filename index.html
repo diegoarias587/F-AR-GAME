@@ -65,9 +65,7 @@
       <a-asset-item id="bottas" src="models/f1/alfa%20romeo/vottas/vottas.obj"></a-asset-item>
       <a-asset-item id="zhou" src="models/f1/alfa%20romeo/zhou/zhou.obj"></a-asset-item>
     </a-assets>
-    <a-entity id="player-car" gps-entity-place="latitude:0; longitude:0" rotation="0 0 0" scale="0.5 0.5 0.5">
-      <a-box depth="1" height="0.3" width="0.5" color="red"></a-box>
-    </a-entity>
+    <a-entity id="player-car" gps-entity-place="latitude:0; longitude:0" rotation="0 0 0" scale="0.5 0.5 0.5"></a-entity>
   </a-scene>
 <script>
 const teams = [
@@ -153,8 +151,29 @@ startRaceBtn.onclick=function(){
   lapEl.textContent='0';
   statusEl.textContent='Carrera iniciada';
   const player=document.getElementById('player-car');
+  const playerId=teams[parseInt(select.value,10)].driver.toLowerCase();
+  player.setAttribute('obj-model',`obj:#${playerId}`);
   const ai=[];
   const scene=document.querySelector('a-scene');
+  const start=saved[0];
+  const path=document.createElement('a-entity');
+  path.setAttribute('gps-entity-place',`latitude:${start.lat};longitude:${start.lon}`);
+  const pts=saved.map(pt=>{
+    const dx=(pt.lon-start.lon)*111320*Math.cos(start.lat*Math.PI/180);
+    const dz=-(pt.lat-start.lat)*111320;
+    return `${dx} 0 ${dz}`;
+  }).join(',');
+  path.setAttribute('line',`color: yellow; path: ${pts}`);
+  scene.appendChild(path);
+  pitPos.forEach((p,i)=>{
+    const pit=document.createElement('a-box');
+    pit.setAttribute('gps-entity-place',`latitude:${p.lat};longitude:${p.lon}`);
+    pit.setAttribute('width','1');
+    pit.setAttribute('height','0.2');
+    pit.setAttribute('depth','2');
+    pit.setAttribute('color','blue');
+    scene.appendChild(pit);
+  });
   teams.forEach((t,i)=>{
     if(i===parseInt(select.value,10))return; // skip player
     const mId=t.driver.toLowerCase();
