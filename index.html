@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>F1 AR Game 2025</title>
+  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ar-js-org/ar.js@3.3.2/aframe/build/aframe-ar.js"></script>
+  <style>
+    body,html{margin:0;padding:0;overflow:hidden}
+  </style>
+</head>
+<body>
+  <a-scene embedded arjs="trackingMethod: best;" renderer="colorManagement: true;" vr-mode-ui="enabled: false">
+    <a-assets>
+      <a-asset-item id="playerModel" src="models/f1/player.obj"></a-asset-item>
+      <a-asset-item id="car-mercedes" src="models/f1/mercedes.glb"></a-asset-item>
+      <a-asset-item id="car-astonmartin" src="models/f1/astonmartin.glb"></a-asset-item>
+      <a-asset-item id="car-rb" src="models/f1/RB.glb"></a-asset-item>
+      <a-asset-item id="car-williams" src="models/f1/williams.glb"></a-asset-item>
+      <a-asset-item id="car-alpine" src="models/f1/alpine.glb"></a-asset-item>
+      <a-asset-item id="car-mclaren" src="models/f1/mclaren.glb"></a-asset-item>
+      <a-asset-item id="car-haas" src="models/f1/haas.glb"></a-asset-item>
+      <a-asset-item id="car-redbull" src="models/f1/redbull.glb"></a-asset-item>
+      <a-asset-item id="car-sauber" src="models/f1/sauber.glb"></a-asset-item>
+      <a-asset-item id="car-ferrari" src="models/f1/ferrari.glb"></a-asset-item>
+    </a-assets>
+
+    <a-entity id="player-car" obj-model="obj: #playerModel" position="0 0 0" rotation="0 0 0" scale="1 1 1" player-follow></a-entity>
+  </a-scene>
+
+  <script>
+  // listado de modelos disponibles
+  const carModels = [
+    { team: 'mercedes', path: 'models/f1/mercedes.glb' },
+    { team: 'astonmartin', path: 'models/f1/astonmartin.glb' },
+    { team: 'rb', path: 'models/f1/RB.glb' },
+    { team: 'williams', path: 'models/f1/williams.glb' },
+    { team: 'alpine', path: 'models/f1/alpine.glb' },
+    { team: 'mclaren', path: 'models/f1/mclaren.glb' },
+    { team: 'haas', path: 'models/f1/haas.glb' },
+    { team: 'redbull', path: 'models/f1/redbull.glb' },
+    { team: 'sauber', path: 'models/f1/sauber.glb' },
+    { team: 'ferrari', path: 'models/f1/ferrari.glb' }
+  ];
+  // TODO: instanciar los 20 autos IA y asociar cada modelo a un piloto
+
+  // Componente para seguir la cámara
+  AFRAME.registerComponent('player-follow', {
+    tick: function(){
+      const cam = document.querySelector('[camera]');
+      if(!cam) return;
+      const pos = cam.object3D.position.clone();
+      this.el.object3D.position.set(pos.x, pos.y - 1, pos.z); // auto bajo el jugador
+      this.el.object3D.rotation.copy(cam.object3D.rotation);
+    }
+  });
+
+  // Registro de circuito
+  const recordedTrack = [];
+  function recordTrackPoint(position){
+    recordedTrack.push(position.clone());
+    // TODO: dibujar spline visible para la IA
+  }
+  // TODO: usar GPS y AR anchors para obtener la posición real
+
+  // Puntos de pits y contador de vueltas
+  const pits = [];
+  let lapCounterAnchor = null;
+  function addPitAnchor(position){ pits.push(position.clone()); }
+  function setLapCounterAnchor(position){ lapCounterAnchor = position.clone(); }
+  // TODO: lógica de detección de paso por vuelta y penalizaciones
+
+  // TODO: vuelta de formación, parrilla, safety car y reglas completas de F1
+  </script>
+</body>
+</html>
