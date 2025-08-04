@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <title>F1 AR Racing Game 2025</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        body { margin: 0; font-family: 'Arial', sans-serif; background-color: #000; color: #fff; overflow: hidden; }
+        #container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        canvas { display: block; }
+        .ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.7); }
+        .menu { text-align: center; }
+        .menu button, .race-ui button {
+            background-color: #e10600; color: white; border: none; padding: 15px 30px; margin: 10px;
+            font-size: 1.2em; cursor: pointer; border-radius: 8px; transition: background-color 0.3s;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        .menu button:hover { background-color: #ff3c36; }
+        #team-selection { display: none; flex-wrap: wrap; justify-content: center; max-width: 80vw; }
+        .team-card { background: #333; border: 2px solid #555; border-radius: 10px; margin: 10px; padding: 20px; cursor: pointer; transition: transform 0.2s, border-color 0.2s; }
+        .team-card:hover { transform: scale(1.05); border-color: #e10600; }
+        .team-card img { width: 150px; height: auto; }
+        .team-card p { margin-top: 10px; font-weight: bold; }
+        #race-ui { position: absolute; top: 10px; left: 10px; z-index: 20; display: none; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px; }
+        #leaderboard { list-style: none; padding: 0; margin: 0; }
+        #leaderboard li { margin-bottom: 5px; }
+        #notifications { position: absolute; bottom: 80px; width: 100%; text-align: center; font-size: 1.5em; font-weight: bold; text-shadow: 2px 2px 4px #000; z-index: 30; }
+        #ar-button { position: absolute; bottom: 20px; right: 20px; z-index: 100; }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+
+    <div id="main-menu" class="ui">
+        <div class="menu">
+            <h1>F1 AR Racing 2025</h1>
+            <p>Crea tu propio circuito y compite en Realidad Aumentada</p>
+            <button id="start-game-btn">Iniciar Juego</button>
+        </div>
+    </div>
+
+    <div id="team-selection" class="ui">
+        <!-- Las tarjetas de equipo se generarán aquí con JS -->
+    </div>
+
+    <div id="race-setup-ui" class="ui" style="display: none;">
+        <div class="menu">
+            <h2>Configuración de Carrera</h2>
+            <button id="record-track-btn">1. Grabar Circuito</button>
+            <button id="place-pits-btn" disabled>2. Colocar Pits (0/4)</button>
+            <button id="place-grid-btn" disabled>3. Colocar Parrilla de Salida (0/20)</button>
+            <button id="place-lap-counter-btn" disabled>4. Colocar Contador de Vueltas</button>
+            <label for="lap-selector">Vueltas:</label>
+            <select id="lap-selector">
+                <option value="3">3 Vueltas</option>
+                <option value="5">5 Vueltas</option>
+                <option value="10">10 Vueltas</option>
+            </select>
+            <button id="start-race-btn" disabled>¡Comenzar Carrera!</button>
+        </div>
+    </div>
+
+    <div id="race-ui">
+        <h3>Posiciones</h3>
+        <ul id="leaderboard"></ul>
+        <p>Vuelta: <span id="lap-count">0</span>/<span id="total-laps">0</span></p>
+        <p>Tiempo de Vuelta: <span id="lap-time">00:00.000</span></p>
+        <p>Vuelta Rápida: <span id="fastest-lap">--:--.---</span></p>
+    </div>
+
+    <div id="notifications"></div>
+
+    <button id="ar-button" style="display: none;">Iniciar AR</button>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Variables Globales y Configuración ---
+        let container, camera, scene, renderer, controls;
+        let controller, reticle;
+        let hitTestSource = null;
+        let hitTestSourceRequested = false;
+        let arSession = null;
+
+        const gameState = {
+            current: 'MENU', // MENU, TEAM_SELECTION, RACE_SETUP, RECORDING_TRACK, PLACING_PITS, PLACING_GRID, PLACING_LAP_COUNTER, FORMATION_LAP, RACING, RACE_END
+            playerTeam: null,
+            totalLaps: 3,
+            currentLap: 0,
+            raceStartTime: 0,
+            lapStartTime: 0,
+            fastestLapTime: Infinity,
+        };
+
+        const teams = [
+            { name: "Mercedes-AMG Petronas", model: "./models/f1/mercedes.glb", drivers: ["George Russell", "Andrea Kimi Antonelli"] },
+            { name: "Scuderia Ferrari", model: "./models/f1/ferrari.glb", drivers: ["Charles Leclerc", "Lewis Hamilton"] },
+            { name: "Oracle Red Bull Racing", model: "./models/f1/redbull.glb", drivers: ["Max Verstappen", "Sergio Pérez"] },
+            { name: "McLaren Formula 1 Team", model: "./models/f1/mclaren.glb", drivers: ["Lando Norris", "Oscar Piastri"] },
+            { name: "Aston Martin Aramco", model: "./models/f1/astonmartin.glb", drivers: ["Fernando Alonso", "Lance Stroll"] },
+            { name: "BWT Alpine F1 Team", model: "./models/f1/alpine.glb", drivers: ["Pierre Gasly", "Esteban Ocon"] },
+            { name: "Williams Racing", model: "./models/f1/williams.glb", drivers: ["Alex Albon", "Carlos Sainz"] },
+            { name: "Visa Cash App RB", model: "./models/f1/RB.glb", drivers: ["Yuki Tsunoda", "Daniel Ricciardo"] },
+            { name: "Stake F1 Team Kick Sauber", model: "./models/f1/sauber.glb", drivers: ["Nico Hülkenberg", "Valtteri Bottas"] },
+            { name: "MoneyGram Haas F1 Team", model: "./models/f1/haas.glb", drivers: ["Kevin Magnussen", "Oliver Bearman"] }
+        ];
+
+        const cars = [];
+        let playerCar;
+        const circuit = {
+            spline: null,
+            points: [],
+            pits: [],
+            grid: [],
+            lapCounterPosition: null,
+        };
+
+        const sounds = {
+            engine: null,
+            crash: null
+        };
+
+        // --- Elementos UI ---
+        const mainMenu = document.getElementById('main-menu');
+        const teamSelectionUI = document.getElementById('team-selection');
+        const raceSetupUI = document.getElementById('race-setup-ui');
+        const raceUI = document.getElementById('race-ui');
+        const notifications = document.getElementById('notifications');
+        const arButton = document.getElementById('ar-button');
+
+        // --- Inicialización ---
+        function init() {
+            container = document.getElementById('container');
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
+            
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3);
+            light.position.set(0.5, 1, 0.25);
+            scene.add(light);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // Controles para depuración sin AR
+            controls = new OrbitControls(camera, renderer.domElement);
+            camera.position.set(0, 2, 5);
+            controls.update();
+
+            setupUI();
+            loadSounds();
+
+            window.addEventListener('resize', onWindowResize);
+            animate();
+        }
+
+        function setupUI() {
+            document.getElementById('start-game-btn').addEventListener('click', () => {
+                gameState.current = 'TEAM_SELECTION';
+                updateUI();
+            });
+
+            const teamSelectionContainer = document.getElementById('team-selection');
+            teams.forEach(team => {
+                const card = document.createElement('div');
+                card.className = 'team-card';
+                card.innerHTML = `<p>${team.name}</p>`;
+                card.onclick = () => selectTeam(team);
+                teamSelectionContainer.appendChild(card);
+            });
+
+            document.getElementById('record-track-btn').addEventListener('click', startRecordingTrack);
+            document.getElementById('place-pits-btn').addEventListener('click', () => setPlacingMode('PLACING_PITS'));
+            document.getElementById('place-grid-btn').addEventListener('click', () => setPlacingMode('PLACING_GRID'));
+            document.getElementById('place-lap-counter-btn').addEventListener('click', () => setPlacingMode('PLACING_LAP_COUNTER'));
+            document.getElementById('start-race-btn').addEventListener('click', startFormationLap);
+            document.getElementById('lap-selector').addEventListener('change', (e) => gameState.totalLaps = parseInt(e.target.value));
+        }
+
+        function updateUI() {
+            mainMenu.style.display = gameState.current === 'MENU' ? 'flex' : 'none';
+            teamSelectionUI.style.display = gameState.current === 'TEAM_SELECTION' ? 'flex' : 'none';
+            raceSetupUI.style.display = gameState.current.startsWith('RACE_SETUP') || gameState.current.startsWith('PLACING') || gameState.current === 'RECORDING_TRACK' ? 'flex' : 'none';
+            raceUI.style.display = gameState.current === 'RACING' || gameState.current === 'FORMATION_LAP' ? 'block' : 'none';
+
+            if (gameState.current.startsWith('RACE_SETUP')) {
+                document.getElementById('place-pits-btn').disabled = circuit.points.length === 0;
+                document.getElementById('place-pits-btn').innerText = `2. Colocar Pits (${circuit.pits.length}/4)`;
+                document.getElementById('place-grid-btn').disabled = circuit.points.length === 0;
+                document.getElementById('place-grid-btn').innerText = `3. Colocar Parrilla (${circuit.grid.length}/20)`;
+                document.getElementById('place-lap-counter-btn').disabled = circuit.points.length === 0;
+                document.getElementById('start-race-btn').disabled = !(circuit.points.length > 5 && circuit.pits.length === 4 && circuit.grid.length === 20 && circuit.lapCounterPosition);
+            }
+        }
+        
+        function selectTeam(team) {
+            gameState.playerTeam = team;
+            gameState.current = 'RACE_SETUP';
+            showNotification(`Equipo seleccionado: ${team.name}`, 3000);
+            
+            if ('xr' in navigator) {
+                navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+                    if (supported) {
+                        arButton.style.display = 'block';
+                        arButton.onclick = startAR;
+                    } else {
+                        showNotification("AR no soportado en este dispositivo.", 5000);
+                    }
+                });
+            } else {
+                showNotification("WebXR no disponible.", 5000);
+            }
+            updateUI();
+        }
+
+        function loadSounds() {
+            const listener = new THREE.AudioListener();
+            camera.add(listener);
+            const audioLoader = new THREE.AudioLoader();
+            audioLoader.load('./sounds/f1_engine.mp3', (buffer) => {
+                sounds.engine = new THREE.PositionalAudio(listener);
+                sounds.engine.setBuffer(buffer);
+                sounds.engine.setRefDistance(20);
+                sounds.engine.setLoop(true);
+            });
+            audioLoader.load('./sounds/crash.mp3', (buffer) => {
+                sounds.crash = new THREE.PositionalAudio(listener);
+                sounds.crash.setBuffer(buffer);
+            });
+        }
+
+        // --- Lógica de AR ---
+        function startAR() {
+            arButton.style.display = 'none';
+            navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body } }).then(onSessionStarted);
+        }
+
+        function onSessionStarted(session) {
+            arSession = session;
+            renderer.xr.setReferenceSpaceType('local');
+            renderer.xr.setSession(session);
+            
+            session.requestReferenceSpace('viewer').then((referenceSpace) => {
+                session.requestHitTestSource({ space: referenceSpace }).then((source) => {
+                    hitTestSource = source;
+                });
+            });
+
+            session.addEventListener('end', onSessionEnded);
+            session.addEventListener('select', onSelect);
+        }
+
+        function onSessionEnded() {
+            arSession = null;
+            hitTestSource = null;
+            hitTestSourceRequested = false;
+            gameState.current = 'MENU';
+            updateUI();
+        }
+
+        function onSelect(event) {
+            if (!reticle || !reticle.visible) return;
+
+            const position = new THREE.Vector3();
+            position.setFromMatrixPosition(reticle.matrix);
+
+            if (gameState.current === 'PLACING_PITS' && circuit.pits.length < 4) {
+                const pitMarker = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.5, 0.1, 2),
+                    new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.7 })
+                );
+                pitMarker.position.copy(position);
+                pitMarker.quaternion.setFromRotationMatrix(reticle.matrix);
+                scene.add(pitMarker);
+                circuit.pits.push(position.clone());
+                showNotification(`Pit ${circuit.pits.length} colocado.`, 2000);
+                if (circuit.pits.length === 4) setPlacingMode('RACE_SETUP');
+                updateUI();
+            }
+            else if (gameState.current === 'PLACING_GRID' && circuit.grid.length < 20) {
+                const gridMarker = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.5, 0.1, 1),
+                    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7 })
+                );
+                gridMarker.position.copy(position);
+                gridMarker.quaternion.setFromRotationMatrix(reticle.matrix);
+                scene.add(gridMarker);
+                circuit.grid.push({position: position.clone(), quaternion: gridMarker.quaternion.clone()});
+                showNotification(`Posición de parrilla ${circuit.grid.length}/20 colocada.`, 2000);
+                if (circuit.grid.length === 20) setPlacingMode('RACE_SETUP');
+                updateUI();
+            }
+            else if (gameState.current === 'PLACING_LAP_COUNTER' && !circuit.lapCounterPosition) {
+                const lapCounterMarker = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.1, 0.1, 3, 16),
+                    new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+                );
+                lapCounterMarker.position.copy(position);
+                scene.add(lapCounterMarker);
+                circuit.lapCounterPosition = position.clone();
+                showNotification(`Contador de vueltas colocado.`, 2000);
+                setPlacingMode('RACE_SETUP');
+                updateUI();
+            }
+        }
+
+        // --- Lógica del Juego ---
+        function startRecordingTrack() {
+            gameState.current = 'RECORDING_TRACK';
+            circuit.points = [];
+            showNotification('Caminando para grabar la pista. La línea verde muestra tu trazado.', 5000);
+        }
+
+        function setPlacingMode(mode) {
+            gameState.current = mode;
+            showNotification(`Modo: ${mode}. Apunta y pulsa para colocar.`, 3000);
+            updateUI();
+        }
+
+        function createCircuitSpline() {
+            if (circuit.points.length < 2) return;
+            const existingSpline = scene.getObjectByName("circuitSpline");
+            if (existingSpline) {
+                scene.remove(existingSpline);
+                existingSpline.geometry.dispose();
+                existingSpline.material.dispose();
+            }
+
+            circuit.spline = new THREE.CatmullRomCurve3(circuit.points, true);
+            const points = circuit.spline.getPoints(circuit.points.length * 10);
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({ color: 0x00ff00 });
+            const splineObject = new THREE.Line(geometry, material);
+            splineObject.name = "circuitSpline";
+            splineObject.position.y = 0.05;
+            scene.add(splineObject);
+        }
+
+        async function loadCars() {
+            const loader = new GLTFLoader();
+            const carPromises = [];
+            
+            cars.forEach(car => scene.remove(car.model));
+            if (playerCar) camera.remove(playerCar.model);
+            cars.length = 0;
+            playerCar = null;
+
+            let carIndex = 0;
+            for (const team of teams) {
+                for (const driver of team.drivers) {
+                    const isPlayer = team.name === gameState.playerTeam.name && driver === team.drivers[0];
+                    const promise = loader.loadAsync(team.model).then(gltf => {
+                        const carModel = gltf.scene;
+                        const box = new THREE.Box3().setFromObject(carModel);
+                        const size = box.getSize(new THREE.Vector3());
+                        const scale = 5.5 / size.x; 
+                        carModel.scale.set(scale, scale, scale);
+                        
+                        carModel.traverse(child => {
+                            if (child.isMesh) {
+                                child.castShadow = true;
+                            }
+                        });
+
+                        const carObject = {
+                            model: carModel,
+                            driver: driver,
+                            team: team.name,
+                            isPlayer: isPlayer,
+                            speed: 0,
+                            splineOffset: carIndex / (teams.length * 2),
+                            targetPosition: new THREE.Vector3(),
+                            state: 'RACING'
+                        };
+
+                        if (isPlayer) {
+                            playerCar = carObject;
+                            playerCar.model.position.set(0, -0.5, -1.5);
+                            camera.add(playerCar.model);
+                        } else {
+                            scene.add(carModel);
+                        }
+                        
+                        cars.push(carObject);
+                    });
+                    carPromises.push(promise);
+                    carIndex++;
+                }
+            }
+
+            await Promise.all(carPromises);
+            showNotification('Todos los autos cargados.', 2000);
+        }
+
+        function startFormationLap() {
+            gameState.current = 'FORMATION_LAP';
+            loadCars().then(() => {
+                const circuitSpline = scene.getObjectByName("circuitSpline");
+                if (circuitSpline) circuitSpline.visible = false;
+
+                cars.sort((a, b) => a.isPlayer ? -1 : b.isPlayer ? 1 : 0);
+
+                cars.forEach((car, index) => {
+                    if (circuit.grid[index]) {
+                        const pos = circuit.grid[index].position;
+                        const quat = circuit.grid[index].quaternion;
+                        if (!car.isPlayer) {
+                            car.model.position.copy(pos);
+                            car.model.quaternion.copy(quat);
+                        }
+                        car.splineOffset = index / cars.length; 
+                    }
+                });
+                
+                showNotification('Vuelta de formación. ¡Prepárate!', 5000);
+                updateUI();
+                
+                setTimeout(() => {
+                    setTimeout(setupGridForRaceStart, 30000);
+                }, 2000);
+            });
+        }
+
+        function setupGridForRaceStart() {
+            showNotification('Alineándose en la parrilla...', 3000);
+            cars.forEach((car, index) => {
+                if (!car.isPlayer && circuit.grid[index]) {
+                    const pos = circuit.grid[index].position;
+                    const quat = circuit.grid[index].quaternion;
+                    car.model.position.copy(pos);
+                    car.model.quaternion.copy(quat);
+                    car.model.visible = true;
+                }
+            });
+            
+            setTimeout(startRace, 23000);
+        }
+
+        function startRace() {
+            gameState.current = 'RACING';
+            gameState.currentLap = 1;
+            gameState.raceStartTime = performance.now();
+            gameState.lapStartTime = gameState.raceStartTime;
+            showNotification('¡¡¡LA CARRERA COMIENZA!!!', 5000);
+            updateUI();
+            updateLeaderboard();
+        }
+        
+        function updateLeaderboard() {
+            const leaderboardEl = document.getElementById('leaderboard');
+            leaderboardEl.innerHTML = '';
+            cars.sort((a, b) => b.splineOffset - a.splineOffset);
+            cars.slice(0, 10).forEach((car, index) => {
+                const li = document.createElement('li');
+                li.textContent = `${index + 1}. ${car.driver.substring(0, 3).toUpperCase()}`;
+                if (car.isPlayer) li.style.fontWeight = 'bold';
+                leaderboardEl.appendChild(li);
+            });
+        }
+
+        function updateRaceState(delta) {
+            if (gameState.current !== 'RACING' && gameState.current !== 'FORMATION_LAP') return;
+
+            document.getElementById('lap-count').textContent = gameState.currentLap;
+            document.getElementById('total-laps').textContent = gameState.totalLaps;
+            const now = performance.now();
+            const lapTime = now - gameState.lapStartTime;
+            document.getElementById('lap-time').textContent = formatTime(lapTime);
+
+            cars.forEach(car => {
+                if (car.isPlayer || !circuit.spline) return;
+
+                const speed = 0.01;
+                car.splineOffset = (car.splineOffset + (speed * delta)) % 1;
+                const newPos = circuit.spline.getPointAt(car.splineOffset);
+                const tangent = circuit.spline.getTangentAt(car.splineOffset);
+                
+                const down = new THREE.Vector3(0, -1, 0);
+                const raycaster = new THREE.Raycaster(newPos.clone().add(new THREE.Vector3(0, 1, 0)), down);
+                const intersects = raycaster.intersectObjects(scene.children);
+                if (intersects.length > 0) {
+                    newPos.y = intersects[0].point.y;
+                }
+                
+                car.model.position.lerp(newPos, 0.1);
+                car.model.lookAt(newPos.add(tangent));
+            });
+            
+            if (playerCar) {
+                // Lógica de control del jugador
+            }
+            
+            updateLeaderboard();
+        }
+
+        function formatTime(ms) {
+            if (ms < 0) ms = 0;
+            const minutes = Math.floor(ms / 60000);
+            const seconds = Math.floor((ms % 60000) / 1000);
+            const milliseconds = Math.floor(ms % 1000);
+            return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(milliseconds).padStart(3, '0')}`;
+        }
+
+        function showNotification(message, duration = 3000) {
+            notifications.textContent = message;
+            notifications.style.display = 'block';
+            setTimeout(() => {
+                notifications.style.display = 'none';
+            }, duration);
+        }
+
+        // --- Bucle de Renderizado ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
+
+        let lastTime = 0;
+        function render(timestamp, frame) {
+            const delta = (timestamp - lastTime) / 1000;
+            lastTime = timestamp;
+
+            if (frame) {
+                const referenceSpace = renderer.xr.getReferenceSpace();
+                const session = renderer.xr.getSession();
+                
+                if (hitTestSourceRequested === false) {
+                    session.requestReferenceSpace('viewer').then(refSpace => {
+                        session.requestHitTestSource({ space: refSpace }).then(source => {
+                            hitTestSource = source;
+                        });
+                    });
+                    session.addEventListener('end', () => {
+                        hitTestSourceRequested = false;
+                        hitTestSource = null;
+                    });
+                    hitTestSourceRequested = true;
+                }
+
+                if (hitTestSource) {
+                    const hitTestResults = frame.getHitTestResults(hitTestSource);
+                    if (hitTestResults.length) {
+                        const hit = hitTestResults[0];
+                        if (!reticle) {
+                            reticle = new THREE.Mesh(
+                                new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
+                                new THREE.MeshBasicMaterial()
+                            );
+                            reticle.matrixAutoUpdate = false;
+                            reticle.visible = false;
+                            scene.add(reticle);
+                        }
+                        reticle.visible = true;
+                        const pose = hit.getPose(referenceSpace);
+                        reticle.matrix.fromArray(pose.transform.matrix);
+                    } else {
+                        if (reticle) reticle.visible = false;
+                    }
+                }
+
+                if (gameState.current === 'RECORDING_TRACK') {
+                    const pose = frame.getViewerPose(referenceSpace);
+                    if (pose) {
+                        const pos = pose.transform.position;
+                        const userPosition = new THREE.Vector3(pos.x, pos.y, pos.z);
+                        if (circuit.points.length === 0 || circuit.points[circuit.points.length - 1].distanceTo(userPosition) > 1.0) {
+                            circuit.points.push(userPosition);
+                            if(circuit.points.length > 1) {
+                                createCircuitSpline();
+                            }
+                        }
+                    }
+                }
+            }
+
+            updateRaceState(delta);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        init();
+    </script>
+</body>
+</html>
