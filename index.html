@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>F1 AR 2025</title>
+  <style>
+    body, html { margin:0; padding:0; overflow:hidden; }
+    #ui { position:fixed; top:10px; left:10px; z-index:2; background:rgba(255,255,255,0.8); padding:10px; border-radius:8px; }
+    #lapCounter { margin-top:5px; }
+    canvas { display:block; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <button id="startAR">Iniciar AR</button>
+    <select id="carSelect">
+      <option value="mercedes">Mercedes</option>
+      <option value="astonmartin">Aston Martin</option>
+      <option value="rb">RB</option>
+      <option value="williams">Williams</option>
+      <option value="alpine">Alpine</option>
+      <option value="mclaren">McLaren</option>
+      <option value="haas">Haas</option>
+      <option value="redbull">Red Bull</option>
+      <option value="sauber">Sauber</option>
+      <option value="ferrari">Ferrari</option>
+    </select>
+    <div id="lapCounter">Vuelta: 0</div>
+    <div id="positionBoard">Posición: -</div>
+  </div>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
